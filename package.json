@@ -1,0 +1,1 @@
+{"name":"lightgbm-predictor-frontend","version":"0.1.0","private":true,"dependencies":{"@tailwindcss/vite":"^4.1.13","intro.js":"^8.3.2","react":"^18.2.0","react-dom":"^18.2.0"},"scripts":{"start":"vite"},"devDependencies":{"@vitejs/plugin-react":"^5.0.3","autoprefixer":"^10.4.21","esbuild":"^0.25.10","postcss":"^8.5.6","rollup":"^4.52.0","tailwindcss":"^4.1.13"}}
