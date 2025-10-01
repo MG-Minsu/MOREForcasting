@@ -48,7 +48,7 @@ def health():
     return jsonify({"status": "ok", "model_loaded": model is not None})
 
 
-@app.route("/predict-file", methods=["POST"])
+@app.route("/", methods=["POST"])
 def predict_file():
     try:
         if model is None:
@@ -77,7 +77,7 @@ def predict_file():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/predict-json", methods=["POST"])
+@app.route("/", methods=["POST"])
 def predict_json():
     try:
         if model is None:
@@ -100,3 +100,4 @@ def predict_json():
 # ❌ REMOVE app.run()
 # ✅ Instead expose the app for Vercel
 handler = app
+
