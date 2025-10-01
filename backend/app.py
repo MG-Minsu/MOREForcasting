@@ -4,9 +4,11 @@ import pandas as pd
 import joblib
 import io
 import os
+
 app = Flask(__name__)
 CORS(app)
 
+# Path to model inside the same folder
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "lightgbm_modelver2.pkl")
 
 # Load model once at startup
@@ -45,12 +47,12 @@ def prepare_data(df):
     return df, X_new.index
 
 
-@app.route("/health")
+@app.route("/backend/health")
 def health():
     return jsonify({"status": "ok", "model_loaded": model is not None})
 
 
-@app.route("/predict-file", methods=["POST"])
+@app.route("/backend/predict-file", methods=["POST"])
 def predict_file():
     """Upload Excel and get Excel back with predictions"""
     try:
@@ -62,7 +64,6 @@ def predict_file():
 
         f = request.files["file"]
 
-        # Get sheet_name from form, default to 0 if not provided
         sheet_name = request.form.get("sheet_name", 0)
 
         df = pd.read_excel(f, sheet_name=sheet_name)
@@ -82,7 +83,7 @@ def predict_file():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/predict-json", methods=["POST"])
+@app.route("/backend/predict-json", methods=["POST"])
 def predict_json():
     """Upload Excel and get predictions as JSON array"""
     try:
@@ -93,8 +94,6 @@ def predict_json():
             return jsonify({"error": "No file uploaded"}), 400
 
         f = request.files["file"]
-
-        # Get sheet_name from form, default to 0 if not provided
         sheet_name = request.form.get("sheet_name", 0)
 
         df = pd.read_excel(f, sheet_name=sheet_name)
@@ -107,5 +106,5 @@ def predict_json():
         return jsonify({"error": str(e)}), 500
 
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+# ⚠️ IMPORTANT: Do NOT include app.run() for Vercel
+# Vercel will automatically detect and use the "app" object
