@@ -29,7 +29,7 @@ function App() {
 
     try {
       // --- Excel download request ---
-      const resp = await fetch('/backend/predict-file', {
+      const resp = await fetch('/', {
         method: 'POST',
         body: formData,
       });
@@ -46,7 +46,7 @@ function App() {
       setMessage('Prediction complete!');
 
       // --- JSON display request ---
-      const jsonResp = await fetch('/backend/predict-json', {
+      const jsonResp = await fetch('/', {
         method: 'POST',
         body: formData,
       });
