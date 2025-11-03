@@ -92,9 +92,7 @@ def predict_json():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# For local development with network access
+# Bind to 0.0.0.0 and use PORT from environment
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000, debug=True)
-
-# For Vercel serverless deployment
-handler = app
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
