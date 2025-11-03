@@ -40,6 +40,15 @@ def prepare_data(df):
     
     return df, X_new.index
 
+@app.route("/", methods=["GET"])
+def home():
+    """Root endpoint for health checks"""
+    return jsonify({
+        "status": "running",
+        "service": "WESM Price Prediction API",
+        "model_loaded": model is not None
+    })
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "model_loaded": model is not None})
@@ -92,7 +101,8 @@ def predict_json():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Bind to 0.0.0.0 and use PORT from environment
+# Python equivalent of: const port = process.env.PORT || 4000
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT") or 4000)
+    print(f"🚀 Starting server on 0.0.0.0:{port}")
     app.run(host='0.0.0.0', port=port, debug=False)
