@@ -101,8 +101,8 @@ def predict_json():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Python equivalent of: const port = process.env.PORT || 4000
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT") or 4000)
-    print(f"🚀 Starting server on 0.0.0.0:{port}")
-    app.run(host='0.0.0.0', port=port, debug=False)
+# ❌ REMOVE THIS ENTIRE BLOCK FOR RENDER:
+# if __name__ == "__main__":
+#     port = int(os.environ.get("PORT") or 4000)
+#     print(f"🚀 Starting server on 0.0.0.0:{port}")
+#     app.run(host='0.0.0.0', port=port, debug=False)
