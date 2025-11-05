@@ -9,8 +9,9 @@
     "react-dom": "^18.2.0"
   },
   "scripts": {
-    "start": "vite",
-    "build": "vite build"
+    "dev": "vite",
+    "build": "vite build",
+    "start": "vite preview --port 4173"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.3",
