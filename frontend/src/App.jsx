@@ -46,7 +46,7 @@ function App() {
     setMessage('Prediction complete!');
 
     // --- JSON display request ---
-    const jsonResp = await fetch('https://moreforcasting.onrender.com/predict-json', {
+    const jsonResp = await fetch('https://moreforcasting.onrender.com/predict/json', {
       method: 'POST',
       body: formData,
     });
