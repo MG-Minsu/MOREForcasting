@@ -55,7 +55,6 @@ function App() {
       const preds = await jsonResp.json();
       setPredictions(preds);
 
-      // 👇 open modal automatically when predictions are ready
       setIsModalOpen(true);
     } else {
       setPredictions([]);
@@ -160,3 +159,4 @@ function App() {
 
 
 export default App;
+
