@@ -51,7 +51,6 @@ def home():
 def health():
     return jsonify({"status": "ok", "model_loaded": model is not None})
 
-
 @app.route('/predict-file', methods=['POST'])
 def predict_file():
     try:
@@ -61,10 +60,10 @@ def predict_file():
         file = request.files['file']
 
         try:
-            df = pd.read_csv(file, encoding='utf-8')
+            df = pd.read_csv(file, encoding='utf-8', sep=None, engine='python', on_bad_lines='skip')
         except UnicodeDecodeError:
             file.seek(0)
-            df = pd.read_csv(file, encoding='latin1')
+            df = pd.read_csv(file, encoding='latin1', sep=None, engine='python', on_bad_lines='skip')
 
         print("✅ Uploaded columns:", df.columns.tolist(), flush=True)
 
@@ -111,6 +110,7 @@ def predict_json():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
