@@ -29,7 +29,7 @@ function App() {
 
   try {
     // --- Excel download request ---
-    const resp = await fetch('https://moreforcasting.onrender.com/predict-file', {
+    const resp = await fetch('https://moreforcasting.onrender.com/predict/file', {
       method: 'POST',
       body: formData,
     });
