@@ -44,7 +44,9 @@ def prepare_data(df):
 
     return df, X_new.index
 
-
+@app.route('/')
+def home():
+    return jsonify({"message": "Backend running OK"})
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "model_loaded": model is not None})
@@ -109,3 +111,4 @@ def predict_json():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
