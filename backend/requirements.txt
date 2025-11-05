@@ -1,8 +1,8 @@
-flask
-flask-cors
-pandas
-joblib
-lightgbm
-
-openpyxl
-gunicorn
+Flask==3.0.3
+flask-cors==4.0.0
+pandas==2.2.3
+joblib==1.4.2
+lightgbm==4.3.0
+scikit-learn==1.5.2
+gunicorn==21.2.0
+numpy==2.1.1
