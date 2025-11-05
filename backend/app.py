@@ -59,17 +59,19 @@ def predict_file():
             return jsonify({"error": "No file uploaded"}), 400
 
         file = request.files['file']
-        df = pd.read_csv(file)
 
-        print("✅ Uploaded file columns:", df.columns.tolist(), flush=True)
+        try:
+            df = pd.read_csv(file, encoding='utf-8')
+        except UnicodeDecodeError:
+            file.seek(0)
+            df = pd.read_csv(file, encoding='latin1')
 
-        # Run prediction
+        print("✅ Uploaded columns:", df.columns.tolist(), flush=True)
+
         preds = model.predict(df)
 
-        print("✅ Prediction completed. Sample output:", preds[:5], flush=True)
-
-        output = io.BytesIO()
         df['Prediction'] = preds
+        output = io.BytesIO()
         df.to_csv(output, index=False)
         output.seek(0)
 
@@ -79,6 +81,7 @@ def predict_file():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
 
 
 @app.route("/predict-json", methods=["POST"])
@@ -108,5 +111,6 @@ def predict_json():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
