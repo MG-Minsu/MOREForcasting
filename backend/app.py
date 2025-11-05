@@ -4,6 +4,16 @@ import pandas as pd
 import joblib
 import io
 import os
+import logging
+import sys
+
+# Configure logging to stderr so it shows in Render logs
+logging.basicConfig(
+    level=logging.ERROR,
+    format='%(asctime)s %(levelname)s: %(message)s',
+    handlers=[logging.StreamHandler(sys.stderr)]
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
@@ -58,20 +68,31 @@ def predict_file():
     """Returns predictions as an Excel file"""
     try:
         if model is None:
+            logger.error("Model is None - not loaded")
             return jsonify({"error": "Model not loaded on server."}), 500
         
         if "file" not in request.files:
+            logger.error("No file in request")
             return jsonify({"error": "No file uploaded"}), 400
         
         f = request.files["file"]
+        logger.info(f"Received file: {f.filename}")
+        
         sheet_name = request.form.get("sheet_name", 0)
+        logger.info(f"Reading sheet: {sheet_name}")
+        
         df = pd.read_excel(f, sheet_name=sheet_name)
+        logger.info(f"DataFrame loaded with shape: {df.shape}")
+        logger.info(f"Columns: {df.columns.tolist()}")
+        
         df, _ = prepare_data(df)
+        logger.info("Data prepared successfully")
         
         output = io.BytesIO()
         df.to_excel(output, index=False)
         output.seek(0)
         
+        logger.info("Sending file response")
         return send_file(
             output,
             as_attachment=True,
@@ -79,6 +100,7 @@ def predict_file():
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     except Exception as e:
+        logger.error(f"ERROR in predict_file: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 @app.route("/predict-json", methods=["POST"])
@@ -106,3 +128,4 @@ def predict_json():
 #     port = int(os.environ.get("PORT") or 4000)
 #     print(f"🚀 Starting server on 0.0.0.0:{port}")
 #     app.run(host='0.0.0.0', port=port, debug=False)
+
