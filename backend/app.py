@@ -52,35 +52,32 @@ def health():
     return jsonify({"status": "ok", "model_loaded": model is not None})
 
 
-@app.route("/predict-file", methods=["POST"])
+@app.route('/predict-file', methods=['POST'])
 def predict_file():
-    """Upload Excel and get Excel back with predictions"""
     try:
-        if model is None:
-            return jsonify({"error": "Model not loaded on server."}), 500
-
-        if "file" not in request.files:
+        if 'file' not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
 
-        f = request.files["file"]
+        file = request.files['file']
+        df = pd.read_csv(file)
 
-        # Get sheet_name from form, default to 0 if not provided
-        sheet_name = request.form.get("sheet_name", 0)
+        print("✅ Uploaded file columns:", df.columns.tolist(), flush=True)
 
-        df = pd.read_excel(f, sheet_name=sheet_name)
-        df, _ = prepare_data(df)
+        # Run prediction
+        preds = model.predict(df)
+
+        print("✅ Prediction completed. Sample output:", preds[:5], flush=True)
 
         output = io.BytesIO()
-        df.to_excel(output, index=False)
+        df['Prediction'] = preds
+        df.to_csv(output, index=False)
         output.seek(0)
 
-        return send_file(
-            output,
-            as_attachment=True,
-            download_name="predicted_output.xlsx",
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        return send_file(output, as_attachment=True, download_name='predictions.csv', mimetype='text/csv')
+
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 
@@ -111,4 +108,5 @@ def predict_json():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
