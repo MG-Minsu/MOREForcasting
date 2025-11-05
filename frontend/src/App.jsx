@@ -65,51 +65,7 @@ function App() {
   }
 };
 
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('sheet_name', sheetName);
-
-  setMessage('Uploading...');
-
-  try {
-    // --- Excel download request ---
-    const resp = await fetch('https://moreforcasting.onrender.com/predict-file', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!resp.ok) {
-      const txt = await resp.json();
-      setMessage('Server error: ' + (txt.error || resp.statusText));
-      return;
-    }
-
-    const blob = await resp.blob();
-    const url = window.URL.createObjectURL(blob);
-    setDownloadUrl(url);
-    setMessage('Prediction complete!');
-
-    // --- JSON display request ---
-    const jsonResp = await fetch('https://moreforcasting.onrender.com/predict-json', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (jsonResp.ok) {
-      const preds = await jsonResp.json();
-      setPredictions(preds);
-
-      // 👇 open modal automatically when predictions are ready
-      setIsModalOpen(true);
-    } else {
-      setPredictions([]);
-    }
-  } catch (err) {
-    setMessage('Upload failed: ' + err.message);
-  }
-};
-
-
+  
   return (
     <div className="app-container">
       <img src="/mepclogo.png" alt="Logo" className="logo pt-4" />
