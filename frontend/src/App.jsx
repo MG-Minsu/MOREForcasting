@@ -1,162 +1,108 @@
-import React, { useState } from 'react';
-import './App.css';
+from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
+import pandas as pd
+import joblib
+import io
+import os
 
-function App() {
-  const [file, setFile] = useState(null);
-  const [sheetName, setSheetName] = useState('');
-  const [message, setMessage] = useState('');
-  const [downloadUrl, setDownloadUrl] = useState('');
-  const [predictions, setPredictions] = useState([]);
+app = Flask(__name__)
+CORS(app)
 
-  const handleFileChange = (e) => {
-    setFile(e.target.files[0]);
-    setMessage('');
-    setDownloadUrl('');
-    setPredictions([]);
-  };
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "lightgbm_modelver2.pkl")
 
- const handleUpload = async () => {
-  if (!file) {
-    setMessage('Please choose an Excel file to upload.');
-    return;
-  }
+# Load model once at startup
+try:
+    model = joblib.load(MODEL_PATH)
+    print(f"✅ Model loaded from {MODEL_PATH}")
+except Exception as e:
+    model = None
+    print(f"❌ Failed to load model: {e}")
 
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('sheet_name', sheetName);
-
-  setMessage('Uploading...');
-
-  try {
-    // --- Excel download request ---
-    const resp = await fetch('https://moreforcasting.onrender.com/predict-file', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!resp.ok) {
-      const txt = await resp.json();
-      setMessage('Server error: ' + (txt.error || resp.statusText));
-      return;
-    }
-
-    const blob = await resp.blob();
-    const url = window.URL.createObjectURL(blob);
-    setDownloadUrl(url);
-    setMessage('Prediction complete!');
-
-    // --- JSON display request ---
-    const jsonResp = await fetch('https://moreforcasting.onrender.com/predict-json', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (jsonResp.ok) {
-      const preds = await jsonResp.json();
-      setPredictions(preds);
-
-      // 👇 open modal automatically when predictions are ready
-      setIsModalOpen(true);
-    } else {
-      setPredictions([]);
-    }
-  } catch (err) {
-    setMessage('Upload failed: ' + err.message);
-  }
-};
-
-  
-  return (
-    <div className="app-container">
-      <img src="/mepclogo.png" alt="Logo" className="logo pt-4" />
-      <h1 className="subtitle is-1 pt-3 ">WESM Forecasting Tool</h1>
-      <p className="subtitle is-7 p-1 pl-6 pr-6 has-text-centered">
-        "The WESM Forecasting Tool is a data-driven application designed to predict market prices and demand in the <code>Wholesale Electricity Spot Market.</code> It enables users to upload datasets, analyze trends, and generate accurate forecasts to support better decision-making for energy trading, planning, and risk management." 
-      </p>
-      <div className="columns is-centered p-4">
-        <div>
-          {/* Placeholder */}
-        </div>
-        {/* Form Field */}
-        <div className="is-justify-content-left">
-          <div className="input-group">
-            <label htmlFor="" className="subtitle is-7 is-italic">Excel Upload<i></i></label>
-          </div>
-          <input type="file" accept=".xlsx,.xls" onChange={handleFileChange} className="mb-1 p-3"/>
-          <div className="input-group">
-            <label htmlFor="" className="subtitle is-7 is-italic">Sheet Name<i></i></label>
-            <input
-              className="input is-small p-3"
-              type="text"
-              placeholder="Example: Sheet1"
-              value={sheetName}
-              onChange={(e) => setSheetName(e.target.value)}
-            />
-          </div>
-          <div className="button-group columns is-centered" >
-            <button onClick={handleUpload} disabled={!file}>Generate</button>
-          </div>
-        </div>
-        {/* End */}
-      </div>
-  
-
-      <div className="is">
-        {predictions.length > 0 && (
-        <div className="results">
-          <hr className="m-6"/>
-          <div class="in-line-flex is-justify-content-space-between is-align-items-center mb-4">
-            <h1>Result</h1>
-            <div className="is-flex is-justify-content-flex-end">
-              <div className="is-warning mr-2">
-                {downloadUrl && (
-                  <a
-                    href={downloadUrl}
-                    download="predicted_output.xlsx"
-                    className="is-centered"
-                    style={{ textDecoration: 'none' }}
-                  >
-                    <button>
-                      <i className="fas fa-download pt-1 pb-1"></i>
-                    </button>
-                  </a>
-                )}
-              </div>
-              <div className="has-text-centered">
-                <div>
-                  <button
-                    className="is-danger"
-                    onClick={() => window.location.reload()}
-                  >
-                    <i className="fas fa-rotate pt-1 pb-1"></i>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <table className="prediction-table">
-            <thead>
-              <tr>
-                <th>Hour</th>
-                <th>Predicted EOD WESM Price</th>
-              </tr>
-            </thead>
-            <tbody>
-              {predictions.map((p, i) => (
-                <tr key={i}>
-                  <td>{i + 1}</td>
-                  <td>{p.toFixed ? p.toFixed(4) : p}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        )}
-      </div>
-    </div>
+def prepare_data(df):
+    try:
+        train_features = model.booster_.feature_name()
+    except Exception:
+        train_features = getattr(model, "feature_name_", None) or list(df.columns)
     
-  );
-}
+    present_features = [c for c in train_features if c in df.columns]
+    if len(present_features) == 0:
+        raise ValueError("No training features found in uploaded file.")
+    
+    X_new = df[present_features].copy()
+    
+    for col in X_new.columns:
+        if X_new[col].dtype == "object" or str(X_new[col].dtype).startswith("category"):
+            X_new[col] = X_new[col].astype(str).astype("category")
+    
+    X_new = X_new[X_new.notnull().all(axis=1)]
+    preds = model.predict(X_new)
+    df.loc[X_new.index, "Predicted_EOD_WESM_Price"] = preds
+    
+    return df, X_new.index
 
+@app.route("/", methods=["GET"])
+def home():
+    """Root endpoint for health checks"""
+    return jsonify({
+        "status": "running",
+        "service": "WESM Price Prediction API",
+        "model_loaded": model is not None
+    })
 
-export default App;
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "model_loaded": model is not None})
+
+@app.route("/predict/file", methods=["POST"])
+def predict_file():
+    """Returns predictions as an Excel file"""
+    try:
+        if model is None:
+            return jsonify({"error": "Model not loaded on server."}), 500
+        
+        if "file" not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        
+        f = request.files["file"]
+        sheet_name = request.form.get("sheet_name", 0)
+        df = pd.read_excel(f, sheet_name=sheet_name)
+        df, _ = prepare_data(df)
+        
+        output = io.BytesIO()
+        df.to_excel(output, index=False)
+        output.seek(0)
+        
+        return send_file(
+            output,
+            as_attachment=True,
+            download_name="predicted_output.xlsx",
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/predict/json", methods=["POST"])
+def predict_json():
+    """Returns predictions as JSON array"""
+    try:
+        if model is None:
+            return jsonify({"error": "Model not loaded on server."}), 500
+        
+        if "file" not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        
+        f = request.files["file"]
+        sheet_name = request.form.get("sheet_name", 0)
+        df = pd.read_excel(f, sheet_name=sheet_name)
+        df, valid_idx = prepare_data(df)
+        
+        preds = df.loc[valid_idx, "Predicted_EOD_WESM_Price"].tolist()
+        return jsonify({"predictions": preds, "count": len(preds)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ❌ REMOVE THIS ENTIRE BLOCK FOR RENDER:
+# if __name__ == "__main__":
+#     port = int(os.environ.get("PORT") or 4000)
+#     print(f"🚀 Starting server on 0.0.0.0:{port}")
+#     app.run(host='0.0.0.0', port=port, debug=False)
