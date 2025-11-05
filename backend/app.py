@@ -7,7 +7,7 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "LIGHTGBM-1.pkl")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "lightgbm_model_optimized.pkl")
 
 # Load model once at startup
 try:
@@ -110,6 +110,7 @@ def predict_json():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
+
 
 
 
