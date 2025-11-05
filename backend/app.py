@@ -8,7 +8,7 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "lightgbm_model_optimized.pkl")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "LIGHTGBM-1.pkl")
 
 # Load model once at startup
 try:
