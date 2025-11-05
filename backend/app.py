@@ -8,7 +8,7 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "lightgbm_modelver2.pkl")
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lightgbm_modelver2.pkl")
 
 # Load model once at startup
 try:
@@ -106,6 +106,7 @@ def predict_json():
 #     port = int(os.environ.get("PORT") or 4000)
 #     print(f"🚀 Starting server on 0.0.0.0:{port}")
 #     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
