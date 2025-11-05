@@ -53,7 +53,7 @@ def home():
 def health():
     return jsonify({"status": "ok", "model_loaded": model is not None})
 
-@app.route("/predict-file", methods=["POST"])
+@app.route("/predict/file", methods=["POST"])
 def predict_file():
     """Returns predictions as an Excel file"""
     try:
@@ -106,6 +106,7 @@ def predict_json():
 #     port = int(os.environ.get("PORT") or 4000)
 #     print(f"🚀 Starting server on 0.0.0.0:{port}")
 #     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
