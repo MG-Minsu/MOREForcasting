@@ -43,14 +43,15 @@ CORS(app, resources={
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 # Model path configuration
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "LIGHTGBM-1.pkl")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "lightgbm_model_optimized.pkl")
 
 # Global model variable
 model = None
 
 def load_model():
     """Load model at startup"""
-    global model
+    global model, MODEL_PATH
+    
     try:
         logger.info(f"Attempting to load model from: {MODEL_PATH}")
         logger.info(f"Current directory: {os.getcwd()}")
@@ -61,16 +62,16 @@ def load_model():
             logger.error(f"❌ Model file not found at {MODEL_PATH}")
             # Try to find it
             search_paths = [
-                "LIGHTGBM-1.pkl",
-                "./LIGHTGBM-1.pkl",
-                "../LIGHTGBM-1.pkl",
-                "/opt/render/project/src/LIGHTGBM-1.pkl"
+                "lightgbm_model_optimized.pkl",
+                "./lightgbm_model_optimized.pkl",
+                "../lightgbm_model_optimized.pkl",
+                "/opt/render/project/src/lightgbm_model_optimized.pkl",
+                "/opt/render/project/src/backend/lightgbm_model_optimized.pkl"
             ]
             logger.info("Searching for model in alternate locations...")
             for path in search_paths:
                 if os.path.exists(path):
                     logger.info(f"Found model at: {path}")
-                    global MODEL_PATH
                     MODEL_PATH = path
                     break
             else:
@@ -316,7 +317,6 @@ def predict_file():
         logger.info(f"Content-Length: {request.content_length}")
         logger.info(f"Files: {list(request.files.keys())}")
         logger.info(f"Form: {list(request.form.keys())}")
-        logger.info(f"Headers: {dict(request.headers)}")
         
         # Check model
         if model is None:
@@ -423,8 +423,7 @@ def predict_file():
         
         return jsonify({
             "error": str(e),
-            "type": type(e).__name__,
-            "traceback": traceback.format_exc()
+            "type": type(e).__name__
         }), 500
 
 @app.route("/predict-json", methods=["POST", "OPTIONS"])
