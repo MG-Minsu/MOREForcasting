@@ -42,7 +42,7 @@ CORS(app, resources={
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 # Model path configuration
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "LIGHTGBM-1.pkl")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "lightgbm_model_optimized.pkl")
 
 # Global model variable
 model = None
@@ -455,3 +455,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     logger.info(f"Starting server on port {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
+
