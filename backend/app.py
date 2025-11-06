@@ -68,37 +68,19 @@ def load_model():
 
 # Load model on startup
 logger.info("=" * 60)
-logger.info("Starting WESM Price Prediction API v2.0")
+logger.info("Starting WESM Price Prediction API v3.0")
+logger.info("Following exact prediction logic from training notebook")
 logger.info("=" * 60)
 load_model()
 
-def get_model_features():
-    """Extract feature names from the model"""
-    try:
-        if hasattr(model, 'feature_name_'):
-            return model.feature_name_
-        elif hasattr(model, 'booster_'):
-            return model.booster_.feature_name()
-        elif hasattr(model, 'feature_names_in_'):
-            return list(model.feature_names_in_)
-        else:
-            logger.warning("⚠️ Could not extract feature names from model")
-            return None
-    except Exception as e:
-        logger.error(f"Error getting model features: {str(e)}")
-        return None
-
-def prepare_data(df, fill_missing=True):
+def prepare_data_for_prediction(new_data):
     """
-    Prepares input dataframe for prediction with flexible feature handling
+    Prepare data for prediction following the exact logic from training notebook
     
     Parameters:
     -----------
-    df : DataFrame
-        Input data
-    fill_missing : bool
-        If True, fills missing features with default values (0 for numeric, 'missing' for categorical)
-        If False, raises error if features are missing
+    new_data : DataFrame
+        Input data from uploaded Excel file
     
     Returns:
     --------
@@ -108,119 +90,85 @@ def prepare_data(df, fill_missing=True):
         if model is None:
             raise ValueError("Model is not loaded")
         
-        logger.info(f"Preparing data: {len(df)} rows, {len(df.columns)} columns")
-        logger.info(f"Input columns: {list(df.columns)}")
+        logger.info(f"📊 Input data: {len(new_data)} rows, {len(new_data.columns)} columns")
+        logger.info(f"Input columns: {list(new_data.columns)}")
         
-        # Get expected features from model
-        expected_features = get_model_features()
+        # --- Load feature names used during training ---
+        train_features = model.booster_.feature_name()
+        logger.info(f"🎯 Model expects {len(train_features)} features")
+        logger.info(f"Required features: {train_features}")
         
-        if expected_features is None:
-            raise ValueError("Could not determine model features")
-        
-        logger.info(f"Model expects {len(expected_features)} features")
-        
-        # Find which features are present and missing
-        present_features = [col for col in expected_features if col in df.columns]
-        missing_features = [col for col in expected_features if col not in df.columns]
-        
-        logger.info(f"✅ Present features: {len(present_features)}")
-        logger.info(f"❌ Missing features: {len(missing_features)}")
+        # --- Check which features are missing and handle them ---
+        missing_features = [f for f in train_features if f not in new_data.columns]
         
         if missing_features:
-            logger.info(f"Missing feature names: {missing_features[:10]}")
+            logger.warning(f"⚠️ Missing {len(missing_features)} features in testing data:")
+            logger.warning(f"Missing features: {missing_features}")
+            logger.info("🔧 These features will be filled with 0")
+            
+            # Fill missing features with 0
+            for feature in missing_features:
+                new_data[feature] = 0
+        else:
+            logger.info("✅ All required features present in input data")
         
-        # Handle missing features
-        if len(missing_features) > 0:
-            if not fill_missing:
-                raise ValueError(
-                    f"Missing {len(missing_features)} required features.\n"
-                    f"Missing: {missing_features[:10]}\n"
-                    f"Present: {present_features[:10]}"
-                )
-            else:
-                logger.info(f"🔧 Filling {len(missing_features)} missing features with defaults")
+        # --- Keep only columns used in training ---
+        X_new = new_data[train_features].copy()
+        logger.info(f"📋 Selected features: {X_new.shape}")
         
-        # Create prediction dataset with ALL required features
-        X_pred = pd.DataFrame()
+        # --- Align categorical columns ---
+        # First, identify object columns and convert to category
+        object_cols = X_new.select_dtypes(include=["object"]).columns.tolist()
+        if object_cols:
+            logger.info(f"🔤 Converting {len(object_cols)} object columns to category")
+            for col in object_cols:
+                X_new[col] = X_new[col].astype("category")
         
-        # Add present features
-        for col in present_features:
-            X_pred[col] = df[col]
-        
-        # Add missing features with default values
-        if fill_missing and missing_features:
-            for col in missing_features:
-                # Use 0 for numeric features, 'missing' for categorical
-                X_pred[col] = 0
-                logger.debug(f"Added missing feature '{col}' with default value 0")
-        
-        # Reorder columns to match model's expected order
-        X_pred = X_pred[expected_features]
-        
-        logger.info(f"Final dataset shape: {X_pred.shape}")
-        logger.info(f"Features order matches model: {list(X_pred.columns) == list(expected_features)}")
-        
-        # Handle categorical columns
-        categorical_cols = []
-        for col in X_pred.columns:
-            if X_pred[col].dtype == "object":
-                X_pred[col] = X_pred[col].astype(str).astype("category")
-                categorical_cols.append(col)
-            elif pd.api.types.is_categorical_dtype(X_pred[col]):
-                X_pred[col] = X_pred[col].astype("category")
-                categorical_cols.append(col)
-        
+        # Log categorical columns
+        categorical_cols = X_new.select_dtypes(include="category").columns.tolist()
         if categorical_cols:
-            logger.info(f"Converted {len(categorical_cols)} categorical columns")
+            logger.info(f"📊 Categorical columns: {len(categorical_cols)}")
         
-        # Find valid rows (no missing values in PRESENT features only)
-        # We allow missing features to be filled, but not missing values in provided features
-        valid_mask = df[present_features].notnull().all(axis=1) if present_features else pd.Series([True] * len(df))
-        valid_indices = df[valid_mask].index.tolist()
+        # --- Drop rows with NaN in features ---
+        # Check which rows have any NaN values
+        valid_mask = X_new.notnull().all(axis=1)
+        X_new_clean = X_new[valid_mask]
+        valid_indices = X_new_clean.index.tolist()
         
-        logger.info(f"Valid rows: {len(valid_indices)} out of {len(df)}")
+        logger.info(f"✅ Valid rows: {len(valid_indices)} out of {len(new_data)}")
         
         if len(valid_indices) == 0:
-            raise ValueError(
-                "All rows contain missing values in the provided features. "
-                "Please ensure your data has values for the columns you're providing."
-            )
+            logger.warning("⚠️ No valid rows to predict. All rows have missing values.")
+            return new_data, np.array([]), []
         
-        # Get valid data
-        X_valid = X_pred.loc[valid_indices]
+        # --- Generate predictions ---
+        logger.info(f"🔮 Generating predictions for {len(X_new_clean)} rows...")
+        logger.info(f"Input shape for prediction: {X_new_clean.shape}")
         
-        logger.info(f"Making predictions on {len(X_valid)} rows with {X_valid.shape[1]} features...")
-        logger.info(f"X_valid shape: {X_valid.shape}")
-        logger.info(f"X_valid dtypes: {X_valid.dtypes.value_counts().to_dict()}")
+        predicted_prices = model.predict(X_new_clean)
         
-        # Make predictions
-        try:
-            predictions = model.predict(X_valid)
-            logger.info(f"✅ Predictions successful: {len(predictions)} values")
-            logger.info(f"Prediction range: [{predictions.min():.2f}, {predictions.max():.2f}]")
-            logger.info(f"Prediction mean: {predictions.mean():.2f}")
-        except Exception as e:
-            logger.error(f"❌ Prediction failed: {str(e)}")
-            logger.error(f"X_valid shape: {X_valid.shape}")
-            logger.error(f"Expected features: {len(expected_features)}")
-            logger.error(f"X_valid columns: {list(X_valid.columns)}")
-            raise ValueError(f"Model prediction failed: {str(e)}")
+        logger.info(f"✅ Predictions successful: {len(predicted_prices)} values")
+        logger.info(f"📈 Prediction stats:")
+        logger.info(f"   Min: {predicted_prices.min():.2f}")
+        logger.info(f"   Max: {predicted_prices.max():.2f}")
+        logger.info(f"   Mean: {predicted_prices.mean():.2f}")
+        logger.info(f"   Median: {np.median(predicted_prices):.2f}")
         
-        # Create result dataframe
-        result_df = df.copy()
-        result_df["Predicted_EOD_WESM_Price"] = None
-        result_df.loc[valid_indices, "Predicted_EOD_WESM_Price"] = predictions
+        # --- Add predictions to dataframe ---
+        result_df = new_data.copy()
+        result_df["Predicted_EOD_WESM_Price"] = np.nan
+        result_df.loc[valid_indices, "Predicted_EOD_WESM_Price"] = predicted_prices
         
-        # Add metadata columns
-        result_df["_prediction_status"] = "skipped"
+        # Add metadata
+        result_df["_prediction_status"] = "skipped_missing_values"
         result_df.loc[valid_indices, "_prediction_status"] = "predicted"
-        result_df["_missing_features_filled"] = len(missing_features)
         
-        logger.info("✅ Data preparation complete")
-        return result_df, predictions, valid_indices
+        logger.info("✅ Predictions added to dataframe")
+        
+        return result_df, predicted_prices, valid_indices
         
     except Exception as e:
-        logger.error(f"❌ Error in prepare_data: {str(e)}")
+        logger.error(f"❌ Error in prepare_data_for_prediction: {str(e)}")
         logger.error(traceback.format_exc())
         raise
 
@@ -229,13 +177,14 @@ def home():
     """Root endpoint"""
     return jsonify({
         "service": "WESM Price Prediction API",
-        "version": "2.0",
+        "version": "3.0",
         "status": "running",
         "model_loaded": model is not None,
         "features": {
-            "flexible_features": True,
-            "auto_fill_missing": True,
-            "description": "Missing features are automatically filled with default values"
+            "follows_training_logic": True,
+            "auto_fill_missing_features": True,
+            "handles_categorical_columns": True,
+            "description": "Predictions follow exact logic from training notebook"
         },
         "endpoints": {
             "/health": "GET - Health check",
@@ -257,10 +206,9 @@ def health():
     
     if model is not None:
         try:
-            features = get_model_features()
-            if features:
-                status["feature_count"] = len(features)
-                status["sample_features"] = features[:10] if len(features) > 10 else features
+            train_features = model.booster_.feature_name()
+            status["feature_count"] = len(train_features)
+            status["sample_features"] = train_features[:10] if len(train_features) > 10 else train_features
         except Exception as e:
             status["feature_error"] = str(e)
     
@@ -272,15 +220,17 @@ def list_features():
     if model is None:
         return jsonify({"error": "Model not loaded"}), 503
     
-    features = get_model_features()
-    if features is None:
-        return jsonify({"error": "Could not extract features"}), 500
-    
-    return jsonify({
-        "total_features": len(features),
-        "features": features,
-        "note": "Missing features will be automatically filled with default values (0 for numeric)"
-    })
+    try:
+        train_features = model.booster_.feature_name()
+        
+        return jsonify({
+            "total_features": len(train_features),
+            "features": train_features,
+            "note": "Missing features will be automatically filled with 0"
+        })
+    except Exception as e:
+        logger.error(f"Error getting features: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/predict-file", methods=["POST", "OPTIONS"])
 def predict_file():
@@ -297,7 +247,8 @@ def predict_file():
         # Check model
         if model is None:
             return jsonify({
-                "error": "Model not loaded on server"
+                "error": "Model not loaded on server",
+                "details": "The model file is missing or failed to load"
             }), 503
         
         # Check file upload
@@ -321,30 +272,38 @@ def predict_file():
         except:
             sheet_name = 0
         
-        # Get fill_missing parameter (default True)
-        fill_missing = request.form.get("fill_missing", "true").lower() == "true"
-        logger.info(f"Fill missing features: {fill_missing}")
+        logger.info(f"📊 Using sheet: {sheet_name}")
         
         # Read Excel file
         try:
             file_content = file.read()
             logger.info(f"📦 File size: {len(file_content):,} bytes")
             
-            df = pd.read_excel(io.BytesIO(file_content), sheet_name=sheet_name)
-            logger.info(f"✅ Excel parsed: {len(df)} rows × {len(df.columns)} columns")
+            new_data = pd.read_excel(io.BytesIO(file_content), sheet_name=sheet_name)
+            logger.info(f"✅ Excel parsed successfully")
             
         except Exception as e:
             logger.error(f"❌ Failed to read Excel: {str(e)}")
             return jsonify({
                 "error": "Failed to read Excel file",
-                "details": str(e)
+                "details": str(e),
+                "hint": "Make sure the file is a valid Excel file (.xlsx or .xls)"
             }), 400
         
-        if df.empty:
-            return jsonify({"error": "Uploaded file is empty"}), 400
+        if new_data.empty:
+            return jsonify({
+                "error": "Uploaded file is empty",
+                "details": "The Excel file contains no data"
+            }), 400
         
-        # Make predictions
-        result_df, predictions, valid_indices = prepare_data(df, fill_missing=fill_missing)
+        # Make predictions using exact logic from notebook
+        result_df, predictions, valid_indices = prepare_data_for_prediction(new_data)
+        
+        if len(predictions) == 0:
+            return jsonify({
+                "error": "No valid rows to predict",
+                "details": "All rows have missing values in required features"
+            }), 400
         
         # Create Excel output
         logger.info("📝 Creating output Excel file...")
@@ -411,14 +370,11 @@ def predict_json():
         except:
             sheet_name = 0
         
-        # Get fill_missing parameter (default True)
-        fill_missing = request.form.get("fill_missing", "true").lower() == "true"
-        
         # Read Excel file
         try:
             file_content = file.read()
-            df = pd.read_excel(io.BytesIO(file_content), sheet_name=sheet_name)
-            logger.info(f"✅ Excel parsed: {len(df)} rows × {len(df.columns)} columns")
+            new_data = pd.read_excel(io.BytesIO(file_content), sheet_name=sheet_name)
+            logger.info(f"✅ Excel parsed successfully")
             
         except Exception as e:
             logger.error(f"❌ Failed to read Excel: {str(e)}")
@@ -427,16 +383,25 @@ def predict_json():
                 "details": str(e)
             }), 400
         
-        if df.empty:
+        if new_data.empty:
             return jsonify({"error": "Uploaded file is empty"}), 400
         
-        # Make predictions
-        result_df, predictions, valid_indices = prepare_data(df, fill_missing=fill_missing)
+        # Make predictions using exact logic from notebook
+        result_df, predictions, valid_indices = prepare_data_for_prediction(new_data)
+        
+        if len(predictions) == 0:
+            return jsonify({
+                "success": False,
+                "error": "No valid rows to predict",
+                "details": "All rows have missing values in required features",
+                "total_rows": len(new_data),
+                "predicted_rows": 0
+            }), 400
         
         # Get feature info
-        expected_features = get_model_features()
-        present_features = [col for col in expected_features if col in df.columns]
-        missing_features = [col for col in expected_features if col not in df.columns]
+        train_features = model.booster_.feature_name()
+        present_features = [f for f in train_features if f in new_data.columns]
+        missing_features = [f for f in train_features if f not in new_data.columns]
         
         logger.info(f"✅ Success! Predicted {len(predictions)} rows")
         logger.info("=" * 60 + "\n")
@@ -444,16 +409,22 @@ def predict_json():
         return jsonify({
             "success": True,
             "predictions": predictions.tolist(),
-            "total_rows": len(df),
+            "total_rows": len(new_data),
             "predicted_rows": len(valid_indices),
-            "skipped_rows": len(df) - len(valid_indices),
+            "skipped_rows": len(new_data) - len(valid_indices),
             "valid_indices": valid_indices,
+            "prediction_stats": {
+                "min": float(predictions.min()),
+                "max": float(predictions.max()),
+                "mean": float(predictions.mean()),
+                "median": float(np.median(predictions))
+            },
             "feature_info": {
-                "required_features": len(expected_features),
+                "required_features": len(train_features),
                 "provided_features": len(present_features),
                 "missing_features": len(missing_features),
                 "missing_feature_names": missing_features,
-                "auto_filled": fill_missing
+                "auto_filled_with_zero": len(missing_features) > 0
             }
         })
     
