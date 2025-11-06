@@ -11,14 +11,25 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Filter out Render health checks to reduce log noise
+class HealthCheckFilter(logging.Filter):
+    def filter(self, record):
+        message = record.getMessage()
+        if 'Go-http-client' in message and ('GET /' in message or 'GET /health' in message):
+            return False
+        return True
+
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.addFilter(HealthCheckFilter())
+
 app = Flask(__name__)
 
-# CORS configuration for production
+# CORS configuration - allow all origins for development
 CORS(app, resources={
     r"/*": {
         "origins": "*",
         "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
+        "allow_headers": ["Content-Type", "Authorization"]
     }
 })
 
@@ -133,6 +144,7 @@ def home():
     return jsonify({
         "service": "WESM Price Prediction API",
         "status": "running",
+        "model_loaded": model is not None,
         "endpoints": {
             "/health": "GET - Health check",
             "/predict-file": "POST - Upload Excel, get Excel with predictions",
@@ -161,22 +173,48 @@ def health():
     
     return jsonify(status), 200 if model is not None else 503
 
-@app.route("/predict-file", methods=["POST"])
+@app.route("/predict-file", methods=["POST", "OPTIONS"])
 def predict_file():
     """Upload Excel and get Excel back with predictions"""
+    
+    # Handle OPTIONS request for CORS preflight
+    if request.method == "OPTIONS":
+        return "", 200
+    
     try:
+        # Debug logging
+        logger.info("=== PREDICT-FILE REQUEST START ===")
+        logger.info(f"Content-Type: {request.content_type}")
+        logger.info(f"Files in request: {list(request.files.keys())}")
+        logger.info(f"Form data: {list(request.form.keys())}")
+        
         # Check model
         if model is None:
-            return jsonify({"error": "Model not loaded on server"}), 503
+            logger.error("Model not loaded")
+            return jsonify({
+                "error": "Model not loaded on server",
+                "details": "The model file is missing or failed to load"
+            }), 503
         
         # Check file upload
         if "file" not in request.files:
-            return jsonify({"error": "No file uploaded"}), 400
+            logger.error("No file in request")
+            return jsonify({
+                "error": "No file uploaded",
+                "details": "Please include a file with the key 'file' in your form data",
+                "received_keys": list(request.files.keys())
+            }), 400
         
         file = request.files["file"]
         
-        if file.filename == "":
-            return jsonify({"error": "Empty filename"}), 400
+        if not file or file.filename == "":
+            logger.error("Empty filename")
+            return jsonify({
+                "error": "Empty filename",
+                "details": "The uploaded file has no name"
+            }), 400
+        
+        logger.info(f"Received file: {file.filename}")
         
         # Get sheet name
         sheet_name = request.form.get("sheet_name", "0")
@@ -185,16 +223,35 @@ def predict_file():
         except:
             sheet_name = 0
         
+        logger.info(f"Using sheet: {sheet_name}")
+        
         # Read Excel file
         try:
-            df = pd.read_excel(file, sheet_name=sheet_name)
+            # Read file content into memory first
+            file_content = file.read()
+            logger.info(f"File size: {len(file_content)} bytes")
+            
+            # Reset file pointer and read with pandas
+            file.seek(0)
+            df = pd.read_excel(io.BytesIO(file_content), sheet_name=sheet_name)
+            logger.info(f"Excel read successfully: {len(df)} rows, {len(df.columns)} columns")
+            logger.info(f"Columns: {list(df.columns)[:10]}")
+            
         except Exception as e:
-            return jsonify({"error": f"Failed to read Excel file: {str(e)}"}), 400
+            logger.error(f"Failed to read Excel: {str(e)}")
+            return jsonify({
+                "error": "Failed to read Excel file",
+                "details": str(e),
+                "type": type(e).__name__,
+                "hint": "Make sure the file is a valid Excel file (.xlsx)"
+            }), 400
         
         if df.empty:
-            return jsonify({"error": "Uploaded file is empty"}), 400
-        
-        logger.info(f"Processing file with {len(df)} rows and {len(df.columns)} columns")
+            logger.error("Empty dataframe")
+            return jsonify({
+                "error": "Uploaded file is empty",
+                "details": "The Excel file contains no data"
+            }), 400
         
         # Make predictions
         result_df, predictions, valid_indices = prepare_data(df)
@@ -206,6 +263,7 @@ def predict_file():
         output.seek(0)
         
         logger.info(f"✅ Successfully predicted {len(predictions)} rows")
+        logger.info("=== PREDICT-FILE REQUEST END ===")
         
         return send_file(
             output,
@@ -219,25 +277,52 @@ def predict_file():
         logger.error(traceback.format_exc())
         return jsonify({
             "error": str(e),
-            "type": type(e).__name__
+            "type": type(e).__name__,
+            "traceback": traceback.format_exc()
         }), 500
 
-@app.route("/predict-json", methods=["POST"])
+@app.route("/predict-json", methods=["POST", "OPTIONS"])
 def predict_json():
     """Upload Excel and get predictions as JSON"""
+    
+    # Handle OPTIONS request for CORS preflight
+    if request.method == "OPTIONS":
+        return "", 200
+    
     try:
+        # Debug logging
+        logger.info("=== PREDICT-JSON REQUEST START ===")
+        logger.info(f"Content-Type: {request.content_type}")
+        logger.info(f"Files in request: {list(request.files.keys())}")
+        logger.info(f"Form data: {list(request.form.keys())}")
+        
         # Check model
         if model is None:
-            return jsonify({"error": "Model not loaded on server"}), 503
+            logger.error("Model not loaded")
+            return jsonify({
+                "error": "Model not loaded on server",
+                "details": "The model file is missing or failed to load"
+            }), 503
         
         # Check file upload
         if "file" not in request.files:
-            return jsonify({"error": "No file uploaded"}), 400
+            logger.error("No file in request")
+            return jsonify({
+                "error": "No file uploaded",
+                "details": "Please include a file with the key 'file' in your form data",
+                "received_keys": list(request.files.keys())
+            }), 400
         
         file = request.files["file"]
         
-        if file.filename == "":
-            return jsonify({"error": "Empty filename"}), 400
+        if not file or file.filename == "":
+            logger.error("Empty filename")
+            return jsonify({
+                "error": "Empty filename",
+                "details": "The uploaded file has no name"
+            }), 400
+        
+        logger.info(f"Received file: {file.filename}")
         
         # Get sheet name
         sheet_name = request.form.get("sheet_name", "0")
@@ -246,21 +331,41 @@ def predict_json():
         except:
             sheet_name = 0
         
+        logger.info(f"Using sheet: {sheet_name}")
+        
         # Read Excel file
         try:
-            df = pd.read_excel(file, sheet_name=sheet_name)
+            # Read file content into memory first
+            file_content = file.read()
+            logger.info(f"File size: {len(file_content)} bytes")
+            
+            # Reset file pointer and read with pandas
+            file.seek(0)
+            df = pd.read_excel(io.BytesIO(file_content), sheet_name=sheet_name)
+            logger.info(f"Excel read successfully: {len(df)} rows, {len(df.columns)} columns")
+            logger.info(f"Columns: {list(df.columns)[:10]}")
+            
         except Exception as e:
-            return jsonify({"error": f"Failed to read Excel file: {str(e)}"}), 400
+            logger.error(f"Failed to read Excel: {str(e)}")
+            return jsonify({
+                "error": "Failed to read Excel file",
+                "details": str(e),
+                "type": type(e).__name__,
+                "hint": "Make sure the file is a valid Excel file (.xlsx)"
+            }), 400
         
         if df.empty:
-            return jsonify({"error": "Uploaded file is empty"}), 400
-        
-        logger.info(f"Processing file with {len(df)} rows and {len(df.columns)} columns")
+            logger.error("Empty dataframe")
+            return jsonify({
+                "error": "Uploaded file is empty",
+                "details": "The Excel file contains no data"
+            }), 400
         
         # Make predictions
         result_df, predictions, valid_indices = prepare_data(df)
         
         logger.info(f"✅ Successfully predicted {len(predictions)} rows")
+        logger.info("=== PREDICT-JSON REQUEST END ===")
         
         # Return predictions with metadata
         return jsonify({
@@ -278,7 +383,8 @@ def predict_json():
         return jsonify({
             "success": False,
             "error": str(e),
-            "type": type(e).__name__
+            "type": type(e).__name__,
+            "traceback": traceback.format_exc()
         }), 500
 
 # Error handlers
@@ -289,6 +395,13 @@ def not_found(e):
 @app.errorhandler(500)
 def internal_error(e):
     return jsonify({"error": "Internal server error"}), 500
+
+@app.errorhandler(413)
+def too_large(e):
+    return jsonify({
+        "error": "File too large",
+        "details": "The uploaded file exceeds the maximum allowed size"
+    }), 413
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
