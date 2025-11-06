@@ -6,17 +6,13 @@ function App() {
   const [sheetName, setSheetName] = useState('');
   const [message, setMessage] = useState('');
   const [downloadUrl, setDownloadUrl] = useState('');
-  const [tableData, setTableData] = useState([]);
-  const [columns, setColumns] = useState([]);
-  const [stats, setStats] = useState(null);
+  const [predictions, setPredictions] = useState([]);
 
   const handleFileChange = (e) => {
     setFile(e.target.files[0]);
     setMessage('');
     setDownloadUrl('');
-    setTableData([]);
-    setColumns([]);
-    setStats(null);
+    setPredictions([]);
   };
 
   const handleUpload = async () => {
@@ -34,7 +30,7 @@ function App() {
     setMessage('Uploading...');
 
     try {
-      // --- JSON display request (do this first to get data) ---
+      // --- JSON display request ---
       const jsonResp = await fetch('https://moreforcasting.onrender.com/predict-json', {
         method: 'POST',
         body: formData,
@@ -49,17 +45,16 @@ function App() {
       const result = await jsonResp.json();
 
       if (result.success) {
-        // Set table data
-        setTableData(result.data);
-        setColumns(result.columns);
-        setStats(result.prediction_stats);
+        // Extract only the Predicted_EOD_WESM_Price values
+        const predictionValues = result.data.map(row => row.Predicted_EOD_WESM_Price);
+        setPredictions(predictionValues);
         setMessage('Prediction complete!');
       } else {
         setMessage('Error: ' + result.error);
         return;
       }
 
-      // --- Excel download request (create new FormData) ---
+      // --- Excel download request ---
       const formDataForFile = new FormData();
       formDataForFile.append('file', file);
       if (sheetName) {
@@ -99,7 +94,7 @@ function App() {
         {/* Form Field */}
         <div className="is-justify-content-left">
           <div className="input-group">
-            <label htmlFor="" className="subtitle is-7 is-italic">Excel Upload</label>
+            <label htmlFor="" className="subtitle is-7 is-italic">Excel Upload<i></i></label>
           </div>
           <input 
             type="file" 
@@ -109,11 +104,11 @@ function App() {
           />
           
           <div className="input-group">
-            <label htmlFor="" className="subtitle is-7 is-italic">Sheet Name (optional)</label>
+            <label htmlFor="" className="subtitle is-7 is-italic">Sheet Name<i></i></label>
             <input
               className="input is-small p-3"
               type="text"
-              placeholder="Example: Sheet1 (leave blank for first sheet)"
+              placeholder="Example: Sheet1"
               value={sheetName}
               onChange={(e) => setSheetName(e.target.value)}
             />
@@ -125,7 +120,8 @@ function App() {
           
           {message && (
             <p className="has-text-centered mt-2" style={{
-              color: message.includes('error') || message.includes('failed') ? 'red' : 'green'
+              color: message.includes('error') || message.includes('failed') ? 'red' : 
+                     message.includes('complete') ? 'green' : 'blue'
             }}>
               {message}
             </p>
@@ -135,7 +131,7 @@ function App() {
       </div>
 
       <div className="is">
-        {tableData.length > 0 && (
+        {predictions.length > 0 && (
           <div className="results">
             <hr className="m-6"/>
             
@@ -169,71 +165,28 @@ function App() {
               </div>
             </div>
 
-            {/* Statistics Summary */}
-            {stats && (
-              <div className="box mb-4" style={{background: '#f0f8ff', padding: '15px'}}>
-                <h3 className="subtitle is-5">📊 Prediction Statistics</h3>
-                <div className="columns">
-                  <div className="column">
-                    <strong>Min:</strong> {stats.min.toFixed(2)}
-                  </div>
-                  <div className="column">
-                    <strong>Max:</strong> {stats.max.toFixed(2)}
-                  </div>
-                  <div className="column">
-                    <strong>Mean:</strong> {stats.mean.toFixed(2)}
-                  </div>
-                  <div className="column">
-                    <strong>Median:</strong> {stats.median.toFixed(2)}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Full Data Table */}
-            <div style={{overflowX: 'auto'}}>
-              <table className="prediction-table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    {columns.map((col, idx) => (
-                      <th 
-                        key={idx}
-                        style={{
-                          background: col === 'Predicted_EOD_WESM_Price' ? '#4CAF50' : undefined,
-                          color: col === 'Predicted_EOD_WESM_Price' ? 'white' : undefined
-                        }}
-                      >
-                        {col}
-                      </th>
-                    ))}
+            {/* Simple table showing only Hour and Predicted Price */}
+            <table className="prediction-table">
+              <thead>
+                <tr>
+                  <th>Hour</th>
+                  <th>Predicted EOD WESM Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                {predictions.slice(0, 24).map((p, i) => (
+                  <tr key={i}>
+                    <td>{i + 1}</td>
+                    <td>
+                      {p !== null && p !== undefined
+                        ? (typeof p === 'number' ? p.toFixed(4) : p)
+                        : '-'
+                      }
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {tableData.map((row, rowIdx) => (
-                    <tr key={rowIdx}>
-                      <td>{rowIdx + 1}</td>
-                      {columns.map((col, colIdx) => (
-                        <td 
-                          key={colIdx}
-                          style={{
-                            background: col === 'Predicted_EOD_WESM_Price' ? '#e8f5e9' : undefined,
-                            fontWeight: col === 'Predicted_EOD_WESM_Price' ? 'bold' : undefined
-                          }}
-                        >
-                          {row[col] !== null && row[col] !== undefined
-                            ? (typeof row[col] === 'number' 
-                                ? row[col].toFixed(4) 
-                                : row[col])
-                            : '-'
-                          }
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
