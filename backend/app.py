@@ -6,9 +6,14 @@ import io
 import os
 import traceback
 import logging
+import sys
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
 logger = logging.getLogger(__name__)
 
 # Filter out Render health checks to reduce log noise
@@ -24,7 +29,7 @@ werkzeug_logger.addFilter(HealthCheckFilter())
 
 app = Flask(__name__)
 
-# CORS configuration - allow all origins for development
+# CORS configuration
 CORS(app, resources={
     r"/*": {
         "origins": "*",
@@ -32,6 +37,9 @@ CORS(app, resources={
         "allow_headers": ["Content-Type", "Authorization"]
     }
 })
+
+# Increase max file size (16MB)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 # Model path configuration
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "LIGHTGBM-1.pkl")
@@ -44,11 +52,15 @@ def load_model():
     global model
     try:
         if not os.path.exists(MODEL_PATH):
-            logger.error(f"Model file not found at {MODEL_PATH}")
+            logger.error(f"❌ Model file not found at {MODEL_PATH}")
+            logger.error(f"Current directory: {os.getcwd()}")
+            logger.error(f"Files in directory: {os.listdir(os.path.dirname(__file__) or '.')}")
             return False
         
+        logger.info(f"Loading model from {MODEL_PATH}")
         model = joblib.load(MODEL_PATH)
-        logger.info(f"✅ Model loaded successfully from {MODEL_PATH}")
+        logger.info(f"✅ Model loaded successfully")
+        logger.info(f"Model type: {type(model)}")
         return True
     except Exception as e:
         logger.error(f"❌ Failed to load model: {str(e)}")
@@ -56,22 +68,33 @@ def load_model():
         return False
 
 # Load model on startup
+logger.info("=" * 60)
+logger.info("Starting WESM Price Prediction API")
+logger.info("=" * 60)
 load_model()
 
 def get_model_features():
     """Extract feature names from the model"""
     try:
         if hasattr(model, 'feature_name_'):
-            return model.feature_name_
+            features = model.feature_name_
+            logger.info(f"Got features from feature_name_: {len(features)} features")
+            return features
         elif hasattr(model, 'booster_'):
-            return model.booster_.feature_name()
+            features = model.booster_.feature_name()
+            logger.info(f"Got features from booster_: {len(features)} features")
+            return features
         elif hasattr(model, 'feature_names_in_'):
-            return list(model.feature_names_in_)
+            features = list(model.feature_names_in_)
+            logger.info(f"Got features from feature_names_in_: {len(features)} features")
+            return features
         else:
-            logger.warning("Could not extract feature names from model")
+            logger.warning("⚠️ Could not extract feature names from model")
+            logger.warning(f"Model attributes: {dir(model)}")
             return None
     except Exception as e:
         logger.error(f"Error getting model features: {str(e)}")
+        logger.error(traceback.format_exc())
         return None
 
 def prepare_data(df):
@@ -79,70 +102,102 @@ def prepare_data(df):
     Prepares input dataframe for prediction
     Returns: (result_df, predictions, valid_indices)
     """
-    if model is None:
-        raise ValueError("Model is not loaded")
-    
-    # Get expected features from model
-    expected_features = get_model_features()
-    
-    if expected_features is None:
-        # Fallback: use all columns in dataframe
-        logger.warning("Using all dataframe columns as features")
-        expected_features = list(df.columns)
-    
-    # Find which features are present
-    present_features = [col for col in expected_features if col in df.columns]
-    missing_features = [col for col in expected_features if col not in df.columns]
-    
-    if len(present_features) == 0:
-        raise ValueError(
-            f"No training features found in uploaded file.\n"
-            f"Expected features: {expected_features[:10]}\n"
-            f"Found columns: {list(df.columns)[:10]}"
-        )
-    
-    if missing_features:
-        logger.warning(f"{len(missing_features)} features missing from input data")
-    
-    # Create prediction dataset
-    X_pred = df[present_features].copy()
-    
-    # Handle categorical columns
-    for col in X_pred.columns:
-        if X_pred[col].dtype == "object":
-            X_pred[col] = X_pred[col].astype(str).astype("category")
-        elif pd.api.types.is_categorical_dtype(X_pred[col]):
-            X_pred[col] = X_pred[col].astype("category")
-    
-    # Find valid rows (no missing values)
-    valid_mask = X_pred.notnull().all(axis=1)
-    valid_indices = X_pred[valid_mask].index.tolist()
-    
-    if len(valid_indices) == 0:
-        raise ValueError("All rows contain missing values in required features")
-    
-    # Get valid data
-    X_valid = X_pred.loc[valid_indices]
-    
-    # Make predictions
     try:
-        predictions = model.predict(X_valid)
+        if model is None:
+            raise ValueError("Model is not loaded")
+        
+        logger.info(f"Preparing data: {len(df)} rows, {len(df.columns)} columns")
+        logger.info(f"Input columns: {list(df.columns)[:20]}")
+        
+        # Get expected features from model
+        expected_features = get_model_features()
+        
+        if expected_features is None:
+            # Fallback: use all columns in dataframe
+            logger.warning("⚠️ Using all dataframe columns as features (fallback)")
+            expected_features = list(df.columns)
+        
+        # Find which features are present
+        present_features = [col for col in expected_features if col in df.columns]
+        missing_features = [col for col in expected_features if col not in df.columns]
+        
+        logger.info(f"Expected features: {len(expected_features)}")
+        logger.info(f"Present features: {len(present_features)}")
+        logger.info(f"Missing features: {len(missing_features)}")
+        
+        if len(present_features) == 0:
+            raise ValueError(
+                f"No training features found in uploaded file.\n"
+                f"Expected: {expected_features[:10]}\n"
+                f"Found: {list(df.columns)[:10]}"
+            )
+        
+        if missing_features:
+            logger.warning(f"Missing {len(missing_features)} features: {missing_features[:10]}")
+        
+        # Create prediction dataset
+        X_pred = df[present_features].copy()
+        logger.info(f"Created prediction dataset: {X_pred.shape}")
+        
+        # Handle categorical columns
+        categorical_cols = []
+        for col in X_pred.columns:
+            if X_pred[col].dtype == "object":
+                X_pred[col] = X_pred[col].astype(str).astype("category")
+                categorical_cols.append(col)
+            elif pd.api.types.is_categorical_dtype(X_pred[col]):
+                X_pred[col] = X_pred[col].astype("category")
+                categorical_cols.append(col)
+        
+        if categorical_cols:
+            logger.info(f"Converted {len(categorical_cols)} categorical columns")
+        
+        # Find valid rows (no missing values)
+        valid_mask = X_pred.notnull().all(axis=1)
+        valid_indices = X_pred[valid_mask].index.tolist()
+        
+        logger.info(f"Valid rows: {len(valid_indices)} out of {len(df)}")
+        
+        if len(valid_indices) == 0:
+            raise ValueError(
+                "All rows contain missing values in required features. "
+                "Please check your data and ensure all required columns have values."
+            )
+        
+        # Get valid data
+        X_valid = X_pred.loc[valid_indices]
+        logger.info(f"Making predictions on {len(X_valid)} rows...")
+        
+        # Make predictions
+        try:
+            predictions = model.predict(X_valid)
+            logger.info(f"✅ Predictions successful: {len(predictions)} values")
+            logger.info(f"Prediction range: [{predictions.min():.2f}, {predictions.max():.2f}]")
+        except Exception as e:
+            logger.error(f"❌ Prediction failed: {str(e)}")
+            logger.error(f"X_valid shape: {X_valid.shape}")
+            logger.error(f"X_valid dtypes:\n{X_valid.dtypes}")
+            raise ValueError(f"Model prediction failed: {str(e)}")
+        
+        # Create result dataframe
+        result_df = df.copy()
+        result_df["Predicted_EOD_WESM_Price"] = None
+        result_df.loc[valid_indices, "Predicted_EOD_WESM_Price"] = predictions
+        
+        logger.info("✅ Data preparation complete")
+        return result_df, predictions, valid_indices
+        
     except Exception as e:
-        logger.error(f"Prediction error: {str(e)}")
-        raise ValueError(f"Model prediction failed: {str(e)}")
-    
-    # Create result dataframe
-    result_df = df.copy()
-    result_df["Predicted_EOD_WESM_Price"] = None
-    result_df.loc[valid_indices, "Predicted_EOD_WESM_Price"] = predictions
-    
-    return result_df, predictions, valid_indices
+        logger.error(f"❌ Error in prepare_data: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise
 
 @app.route("/", methods=["GET"])
 def home():
     """Root endpoint"""
     return jsonify({
         "service": "WESM Price Prediction API",
+        "version": "1.1",
         "status": "running",
         "model_loaded": model is not None,
         "endpoints": {
@@ -167,7 +222,7 @@ def health():
             features = get_model_features()
             if features:
                 status["feature_count"] = len(features)
-                status["sample_features"] = features[:5]
+                status["sample_features"] = features[:10] if len(features) > 10 else features
         except Exception as e:
             status["feature_error"] = str(e)
     
@@ -182,23 +237,25 @@ def predict_file():
         return "", 200
     
     try:
-        # Debug logging
-        logger.info("=== PREDICT-FILE REQUEST START ===")
+        logger.info("\n" + "=" * 60)
+        logger.info("PREDICT-FILE REQUEST")
+        logger.info("=" * 60)
         logger.info(f"Content-Type: {request.content_type}")
-        logger.info(f"Files in request: {list(request.files.keys())}")
-        logger.info(f"Form data: {list(request.form.keys())}")
+        logger.info(f"Content-Length: {request.content_length}")
+        logger.info(f"Files: {list(request.files.keys())}")
+        logger.info(f"Form: {list(request.form.keys())}")
         
         # Check model
         if model is None:
-            logger.error("Model not loaded")
+            logger.error("❌ Model not loaded")
             return jsonify({
                 "error": "Model not loaded on server",
-                "details": "The model file is missing or failed to load"
+                "details": "The model file is missing or failed to load. Please contact support."
             }), 503
         
         # Check file upload
         if "file" not in request.files:
-            logger.error("No file in request")
+            logger.error("❌ No file in request")
             return jsonify({
                 "error": "No file uploaded",
                 "details": "Please include a file with the key 'file' in your form data",
@@ -208,13 +265,13 @@ def predict_file():
         file = request.files["file"]
         
         if not file or file.filename == "":
-            logger.error("Empty filename")
+            logger.error("❌ Empty filename")
             return jsonify({
                 "error": "Empty filename",
                 "details": "The uploaded file has no name"
             }), 400
         
-        logger.info(f"Received file: {file.filename}")
+        logger.info(f"📁 Received file: {file.filename}")
         
         # Get sheet name
         sheet_name = request.form.get("sheet_name", "0")
@@ -223,31 +280,30 @@ def predict_file():
         except:
             sheet_name = 0
         
-        logger.info(f"Using sheet: {sheet_name}")
+        logger.info(f"📊 Using sheet: {sheet_name}")
         
         # Read Excel file
         try:
-            # Read file content into memory first
+            # Read file content
             file_content = file.read()
-            logger.info(f"File size: {len(file_content)} bytes")
+            logger.info(f"📦 File size: {len(file_content):,} bytes")
             
-            # Reset file pointer and read with pandas
-            file.seek(0)
+            # Parse Excel
             df = pd.read_excel(io.BytesIO(file_content), sheet_name=sheet_name)
-            logger.info(f"Excel read successfully: {len(df)} rows, {len(df.columns)} columns")
-            logger.info(f"Columns: {list(df.columns)[:10]}")
+            logger.info(f"✅ Excel parsed: {len(df)} rows × {len(df.columns)} columns")
             
         except Exception as e:
-            logger.error(f"Failed to read Excel: {str(e)}")
+            logger.error(f"❌ Failed to read Excel: {str(e)}")
+            logger.error(traceback.format_exc())
             return jsonify({
                 "error": "Failed to read Excel file",
                 "details": str(e),
                 "type": type(e).__name__,
-                "hint": "Make sure the file is a valid Excel file (.xlsx)"
+                "hint": "Make sure the file is a valid Excel file (.xlsx or .xls)"
             }), 400
         
         if df.empty:
-            logger.error("Empty dataframe")
+            logger.error("❌ Empty dataframe")
             return jsonify({
                 "error": "Uploaded file is empty",
                 "details": "The Excel file contains no data"
@@ -257,13 +313,14 @@ def predict_file():
         result_df, predictions, valid_indices = prepare_data(df)
         
         # Create Excel output
+        logger.info("📝 Creating output Excel file...")
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             result_df.to_excel(writer, index=False, sheet_name='Predictions')
         output.seek(0)
         
-        logger.info(f"✅ Successfully predicted {len(predictions)} rows")
-        logger.info("=== PREDICT-FILE REQUEST END ===")
+        logger.info(f"✅ Success! Predicted {len(predictions)} rows")
+        logger.info("=" * 60 + "\n")
         
         return send_file(
             output,
@@ -273,12 +330,16 @@ def predict_file():
         )
     
     except Exception as e:
-        logger.error(f"Error in predict-file: {str(e)}")
-        logger.error(traceback.format_exc())
+        logger.error(f"\n❌ ERROR in predict-file:")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error message: {str(e)}")
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
+        logger.error("=" * 60 + "\n")
+        
         return jsonify({
             "error": str(e),
             "type": type(e).__name__,
-            "traceback": traceback.format_exc()
+            "details": "An error occurred during prediction. Check server logs for details."
         }), 500
 
 @app.route("/predict-json", methods=["POST", "OPTIONS"])
@@ -290,15 +351,15 @@ def predict_json():
         return "", 200
     
     try:
-        # Debug logging
-        logger.info("=== PREDICT-JSON REQUEST START ===")
+        logger.info("\n" + "=" * 60)
+        logger.info("PREDICT-JSON REQUEST")
+        logger.info("=" * 60)
         logger.info(f"Content-Type: {request.content_type}")
-        logger.info(f"Files in request: {list(request.files.keys())}")
-        logger.info(f"Form data: {list(request.form.keys())}")
+        logger.info(f"Files: {list(request.files.keys())}")
         
         # Check model
         if model is None:
-            logger.error("Model not loaded")
+            logger.error("❌ Model not loaded")
             return jsonify({
                 "error": "Model not loaded on server",
                 "details": "The model file is missing or failed to load"
@@ -306,23 +367,22 @@ def predict_json():
         
         # Check file upload
         if "file" not in request.files:
-            logger.error("No file in request")
+            logger.error("❌ No file in request")
             return jsonify({
                 "error": "No file uploaded",
-                "details": "Please include a file with the key 'file' in your form data",
+                "details": "Please include a file with the key 'file'",
                 "received_keys": list(request.files.keys())
             }), 400
         
         file = request.files["file"]
         
         if not file or file.filename == "":
-            logger.error("Empty filename")
+            logger.error("❌ Empty filename")
             return jsonify({
-                "error": "Empty filename",
-                "details": "The uploaded file has no name"
+                "error": "Empty filename"
             }), 400
         
-        logger.info(f"Received file: {file.filename}")
+        logger.info(f"📁 Received file: {file.filename}")
         
         # Get sheet name
         sheet_name = request.form.get("sheet_name", "0")
@@ -331,43 +391,28 @@ def predict_json():
         except:
             sheet_name = 0
         
-        logger.info(f"Using sheet: {sheet_name}")
-        
         # Read Excel file
         try:
-            # Read file content into memory first
             file_content = file.read()
-            logger.info(f"File size: {len(file_content)} bytes")
-            
-            # Reset file pointer and read with pandas
-            file.seek(0)
             df = pd.read_excel(io.BytesIO(file_content), sheet_name=sheet_name)
-            logger.info(f"Excel read successfully: {len(df)} rows, {len(df.columns)} columns")
-            logger.info(f"Columns: {list(df.columns)[:10]}")
+            logger.info(f"✅ Excel parsed: {len(df)} rows × {len(df.columns)} columns")
             
         except Exception as e:
-            logger.error(f"Failed to read Excel: {str(e)}")
+            logger.error(f"❌ Failed to read Excel: {str(e)}")
             return jsonify({
                 "error": "Failed to read Excel file",
-                "details": str(e),
-                "type": type(e).__name__,
-                "hint": "Make sure the file is a valid Excel file (.xlsx)"
+                "details": str(e)
             }), 400
         
         if df.empty:
-            logger.error("Empty dataframe")
-            return jsonify({
-                "error": "Uploaded file is empty",
-                "details": "The Excel file contains no data"
-            }), 400
+            return jsonify({"error": "Uploaded file is empty"}), 400
         
         # Make predictions
         result_df, predictions, valid_indices = prepare_data(df)
         
-        logger.info(f"✅ Successfully predicted {len(predictions)} rows")
-        logger.info("=== PREDICT-JSON REQUEST END ===")
+        logger.info(f"✅ Success! Predicted {len(predictions)} rows")
+        logger.info("=" * 60 + "\n")
         
-        # Return predictions with metadata
         return jsonify({
             "success": True,
             "predictions": predictions.tolist(),
@@ -378,13 +423,15 @@ def predict_json():
         })
     
     except Exception as e:
-        logger.error(f"Error in predict-json: {str(e)}")
-        logger.error(traceback.format_exc())
+        logger.error(f"\n❌ ERROR in predict-json:")
+        logger.error(f"Error: {str(e)}")
+        logger.error(f"Traceback:\n{traceback.format_exc()}")
+        logger.error("=" * 60 + "\n")
+        
         return jsonify({
             "success": False,
             "error": str(e),
-            "type": type(e).__name__,
-            "traceback": traceback.format_exc()
+            "type": type(e).__name__
         }), 500
 
 # Error handlers
@@ -394,15 +441,17 @@ def not_found(e):
 
 @app.errorhandler(500)
 def internal_error(e):
+    logger.error(f"500 Error: {str(e)}")
     return jsonify({"error": "Internal server error"}), 500
 
 @app.errorhandler(413)
 def too_large(e):
     return jsonify({
         "error": "File too large",
-        "details": "The uploaded file exceeds the maximum allowed size"
+        "details": "Maximum file size is 16MB"
     }), 413
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    logger.info(f"Starting server on port {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
