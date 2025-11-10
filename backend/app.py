@@ -43,7 +43,7 @@ CORS(app, resources={
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 # Model path configuration
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "lightgbm_model_optimized.pkl")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "lightgbm_model_optimized-2.pkl")
 
 # Global model variable
 model = None
